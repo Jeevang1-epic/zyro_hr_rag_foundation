@@ -1,0 +1,11 @@
+.venv/
+outputs/
+data/
+datasets/
+.env
+kaggle.json
+__pycache__/
+.pytest_cache/
+*.pyc
+*.zip
+.DS_Store
