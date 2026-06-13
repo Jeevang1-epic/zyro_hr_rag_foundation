@@ -8,7 +8,10 @@ import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
-sys.path.insert(0, str(SRC_DIR))
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+DATASET_ROOT = PROJECT_ROOT / "datasets"
+EXPECTED_DATASET_FOLDER = DATASET_ROOT / "zyro-dynamics-hr-corpus"
 
 from zyro_rag.live_pipeline import (  # noqa: E402
     REFUSAL_MESSAGE,
@@ -22,9 +25,32 @@ from zyro_rag.live_pipeline import (  # noqa: E402
 from zyro_rag.retrieval import HybridTfidfRetriever  # noqa: E402
 
 
+def resolve_dataset_folder() -> Path:
+    if not DATASET_ROOT.exists():
+        raise FileNotFoundError(
+            "HR policy dataset is missing. Expected the repository to include "
+            f"{EXPECTED_DATASET_FOLDER.relative_to(PROJECT_ROOT)} with 11 policy PDFs."
+        )
+
+    try:
+        dataset_folder = detect_dataset_folder(DATASET_ROOT)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            "HR policy dataset could not be detected. Expected 11 policy PDFs under "
+            f"{EXPECTED_DATASET_FOLDER.relative_to(PROJECT_ROOT)}."
+        ) from exc
+
+    pdf_count = len(list(dataset_folder.glob("*.pdf")))
+    if pdf_count != 11:
+        raise FileNotFoundError(
+            f"Expected 11 policy PDFs in {dataset_folder.relative_to(PROJECT_ROOT)}, found {pdf_count}."
+        )
+    return dataset_folder
+
+
 @st.cache_resource(show_spinner="Loading HR policy PDFs...")
 def build_retriever():
-    dataset_folder = detect_dataset_folder(PROJECT_ROOT / "datasets")
+    dataset_folder = resolve_dataset_folder()
     documents = load_pdf_documents(dataset_folder)
     failures = [doc for doc in documents if doc.error or not doc.text.strip()]
     if failures:

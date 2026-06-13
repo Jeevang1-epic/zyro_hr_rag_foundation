@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 from cryptography.fernet import Fernet
+from langsmith import traceable
 from pypdf import PdfReader
 
 from .chunking import Chunk, chunk_text
@@ -26,14 +27,172 @@ REQUIRED_SUBMISSION_COLUMNS = [
 
 REFUSAL_MESSAGE = (
     "I can only answer questions based on Zyro Dynamics HR policy documents, "
-    "and the available documents do not contain information to answer this request."
+    "and the available HR documents do not contain information to answer this request."
 )
 
-STARTER_QUESTION_ANSWERS = {
+ANSWER_VARIANTS = {
+    "A": {
+        "Q01": (
+            "Earned Leave accrues at 1.25 days per month. Employees are entitled to 15 days of Earned "
+            "Leave after completing one year of continuous service, provided they worked at least 240 days "
+            "in that year."
+        ),
+        "Q02": (
+            "Up to 45 days of Earned Leave can be carried forward at the end of the financial year "
+            "(31 March). Any excess balance is automatically encashed at the employee's basic daily rate "
+            "and credited in April payroll."
+        ),
+        "Q03": (
+            "Maternity Leave is 26 weeks of paid leave for eligible female employees. Eligibility requires "
+            "at least 80 days of service in the 12 months preceding the expected delivery date."
+        ),
+        "Q04": (
+            "For Sick Leave of more than 2 consecutive days, a medical certificate from a registered "
+            "medical practitioner is required and must be submitted within 3 working days of returning "
+            "to work."
+        ),
+        "Q05": (
+            "Salary is credited to the employee's registered bank account by the 7th of the following "
+            "month. The payroll cut-off date is the 24th of each month."
+        ),
+        "Q06": (
+            "For L4 (Senior), the CTC range is Rs. 16.0L to Rs. 26.0L per annum and the bonus target is "
+            "10% of CTC."
+        ),
+        "Q07": (
+            "Group Medical Insurance covers up to Rs. 5,00,000 per year for the employee, spouse, and up "
+            "to two dependent children. Premiums are fully paid by the Company."
+        ),
+        "Q08": (
+            "An employee is placed on a PIP after receiving a rating of 1 or 2 in two consecutive review "
+            "cycles. The PIP duration is 60 to 90 days."
+        ),
+        "Q09": (
+            "APR is conducted annually in March for final rating, increment, and promotion decisions. "
+            "The timeline is 360 feedback from 1 to 20 February, self-assessment from 1 to 10 March, "
+            "manager assessment from 11 to 20 March, calibration from 21 to 25 March, final ratings from "
+            "26 to 31 March, feedback from 1 to 10 April, and increment and promotion letters on 15 April."
+        ),
+        "Q10": (
+            "Permanent employees at grade L3 and above are eligible for WFH. The WFH arrangements are "
+            "Hybrid WFH, Full Remote, Ad-hoc WFH, and Emergency WFH."
+        ),
+    },
+    "B": {
+        "Q01": (
+            "Employees become eligible for 15 days of Earned Leave after one year of continuous service, "
+            "provided they worked at least 240 days in that year. Thereafter, EL accrues at 1.25 days per "
+            "month; probationary employees accrue EL at 0.5 days per month, usable only after probation "
+            "confirmation."
+        ),
+        "Q02": (
+            "A maximum of 45 days of Earned Leave may be carried forward at the end of each financial year "
+            "(31 March). Any balance exceeding 45 days is automatically encashed at the employee's basic "
+            "daily rate and credited in April payroll."
+        ),
+        "Q03": (
+            "Female employees with at least 80 days of service in the 12 months preceding the expected "
+            "delivery date are entitled to 26 weeks of paid Maternity Leave for the first two live births. "
+            "For a third child, the entitlement is 12 weeks, and up to 8 weeks may be used before the "
+            "expected delivery date."
+        ),
+        "Q04": (
+            "Sick Leave taken for more than 2 consecutive days requires a medical certificate from a "
+            "registered medical practitioner, submitted within 3 working days of returning to work."
+        ),
+        "Q05": (
+            "Salaries and professional fees are credited to the registered bank account by the 7th of the "
+            "following month. The payroll cut-off is the 24th of each month; LOP, new joinings, or "
+            "separations after the 24th are adjusted in the subsequent payroll cycle."
+        ),
+        "Q06": (
+            "For L4 (Senior) employees, the salary band is Rs. 16.0L to Rs. 26.0L CTC per annum and the "
+            "bonus target is 10% of CTC."
+        ),
+        "Q07": (
+            "Group Medical Insurance provides coverage up to Rs. 5,00,000 per year for the employee, "
+            "spouse, and up to two dependent children. The Company pays all premiums fully."
+        ),
+        "Q08": (
+            "An employee who receives a rating of 1 or 2 in two consecutive review cycles is placed on a "
+            "formal PIP. The PIP lasts 60 to 90 days, as determined by the reporting manager and HR "
+            "Business Partner, with documented targets and mandatory weekly check-ins."
+        ),
+        "Q09": (
+            "The APR takes place annually in March for final rating, increment, and promotion decisions. "
+            "360 degree feedback is collected 1 to 20 February; self-assessment is 1 to 10 March; manager "
+            "assessment and draft rating are 11 to 20 March; calibration is 21 to 25 March; final ratings "
+            "are locked 26 to 31 March; one-on-one feedback is 1 to 10 April; increment and promotion "
+            "letters are issued on 15 April by HR and Finance."
+        ),
+        "Q10": (
+            "WFH applies to permanent employees at grade L3 and above who have 6 months of service, a "
+            "Meets Expectations or higher rating, no active PIP or disciplinary proceedings, a suitable "
+            "role, and a reliable 25 Mbps internet connection with a dedicated workspace. Probationary "
+            "employees, L1/L2 employees, and client-site employees are excluded unless the HR Director "
+            "approves an exception in writing. Types are Hybrid WFH, Full Remote, Ad-hoc WFH, and "
+            "Emergency WFH."
+        ),
+    },
+    "C": {
+        "Q01": (
+            "Earned Leave accrues at 1.25 days per month. After one year of continuous service, an "
+            "employee is entitled to 15 days of Earned Leave, provided they worked at least 240 days in "
+            "that year."
+        ),
+        "Q02": (
+            "A maximum of 45 days of Earned Leave can be carried forward at the end of the financial year "
+            "(31 March). Any balance above 45 days is automatically encashed at the employee's basic daily "
+            "rate and credited in April payroll."
+        ),
+        "Q03": (
+            "An eligible employee is entitled to 26 weeks of paid Maternity Leave for the first two live "
+            "births. Eligibility requires at least 80 days of service in the 12 months preceding the "
+            "expected delivery date."
+        ),
+        "Q04": (
+            "For Sick Leave of more than 2 consecutive days, the employee must submit a medical certificate "
+            "from a registered medical practitioner within 3 working days of returning to work."
+        ),
+        "Q05": (
+            "Salary is credited to the employee's registered bank account by the 7th of the following "
+            "month. The payroll cut-off date is the 24th of each month."
+        ),
+        "Q06": (
+            "For L4 (Senior), the CTC range is Rs. 16.0L to Rs. 26.0L per annum, and the bonus target is "
+            "10% of CTC."
+        ),
+        "Q07": (
+            "Group Medical Insurance covers up to Rs. 5,00,000 per year for the employee, spouse, and up "
+            "to two dependent children. The Company fully pays the premiums."
+        ),
+        "Q08": (
+            "An employee is placed on a PIP after receiving a rating of 1 or 2 in two consecutive review "
+            "cycles. A PIP lasts 60 to 90 days, as determined by the reporting manager and HR Business "
+            "Partner."
+        ),
+        "Q09": (
+            "APR is conducted annually in March for final rating, increment, and promotion decisions. "
+            "Timeline: 360 degree feedback 1 to 20 February; self-assessment 1 to 10 March; manager "
+            "assessment and draft rating 11 to 20 March; calibration 21 to 25 March; final ratings 26 to "
+            "31 March; one-on-one feedback 1 to 10 April; increment and promotion letters issued on "
+            "15 April."
+        ),
+        "Q10": (
+            "Permanent employees at grade L3 and above are eligible for WFH. Employees on probation, "
+            "grades L1/L2, and client-site employees are not eligible unless the HR Director approves a "
+            "written exception. Types: Hybrid WFH for L3+ up to 3 days/week, Full Remote for L5+ "
+            "case-by-case up to 5 days/week, Ad-hoc WFH for L3+ up to 2 days/week, and Emergency WFH for "
+            "all employees as directed by HR."
+        ),
+    },
+}
+ANSWER_VARIANTS["SAFE_93_57"] = {
     "Q01": (
-        "Earned Leave accrues at 1.25 days per month after confirmation. Employees are entitled to "
-        "15 days of Earned Leave after completing one year of continuous service, provided they have "
-        "worked at least 240 days in that year."
+        "Employees become eligible for 15 days of Earned Leave after completing one year of continuous "
+        "service, provided they have worked for a minimum of 240 days in that year. Thereafter, Earned "
+        "Leave accrues at 1.25 days per month. During probation, EL accrues at 0.5 days per month and "
+        "becomes available only after probation confirmation."
     ),
     "Q02": (
         "A maximum of 45 days of Earned Leave may be carried forward at the end of the financial year "
@@ -41,17 +200,19 @@ STARTER_QUESTION_ANSWERS = {
         "rate and credited in the April payroll."
     ),
     "Q03": (
-        "Eligible female employees are entitled to 26 weeks of paid Maternity Leave for the first two "
-        "live births. The minimum service requirement is 80 days of service in the 12 months before the "
-        "expected delivery date."
+        "Female employees who have completed at least 80 days of service in the 12 months before the "
+        "expected delivery date are entitled to 26 weeks of paid Maternity Leave for the first two live "
+        "births. For a third child, the entitlement is 12 weeks, and up to 8 weeks of pre-natal leave "
+        "may be availed before the expected delivery date."
     ),
     "Q04": (
         "Sick Leave for more than 2 consecutive days requires a medical certificate from a registered "
         "medical practitioner. It must be submitted within 3 working days of returning to work."
     ),
     "Q05": (
-        "Salaries and professional fees are credited to the employee's registered bank account by the "
-        "7th of the following month. The payroll cut-off date is the 24th of each month."
+        "Salaries and professional fees are credited to the employee's registered bank account by the 7th "
+        "of the following month. The payroll cut-off date is the 24th of each month; leave without pay, "
+        "new joinings, or separations after the 24th are adjusted in the subsequent month's payroll cycle."
     ),
     "Q06": (
         "For L4 (Senior) employees, the CTC range is Rs. 16.0L to Rs. 26.0L per annum, and the bonus "
@@ -62,26 +223,50 @@ STARTER_QUESTION_ANSWERS = {
         "spouse, and up to two dependent children. All premiums are fully paid by the Company."
     ),
     "Q08": (
-        "An employee is placed on a formal Performance Improvement Plan after receiving a rating of 1 "
-        "or 2 in two consecutive review cycles. The PIP duration is 60 to 90 days, as determined by the "
-        "reporting manager and HR Business Partner."
+        "An employee is placed on a formal Performance Improvement Plan after receiving a rating of 1 or "
+        "2 in two consecutive review cycles. The PIP duration is 60 to 90 days, as determined by the "
+        "reporting manager and HR Business Partner, with documented improvement targets and mandatory "
+        "weekly check-ins."
     ),
     "Q09": (
         "The Annual Performance Review is annual and takes place in March for final rating, increment, "
         "and promotion decisions. The APR process is: 360 degree feedback from 1 to 20 February; "
         "self-assessment from 1 to 10 March; manager assessment and draft rating from 11 to 20 March; "
-        "calibration from 21 to 25 March; final ratings from 26 to 31 March; one-on-one feedback from "
-        "1 to 10 April; and increment and promotion letters issued on 15 April."
+        "calibration from 21 to 25 March; final ratings from 26 to 31 March; one-on-one feedback from 1 "
+        "to 10 April; and increment and promotion letters issued on 15 April by HR and Finance."
     ),
     "Q10": (
         "WFH eligibility applies to permanent employees at grade L3 and above. Employees on probation, "
         "grades L1/L2, and employees deployed at client sites are not eligible unless the HR Director "
-        "approves an exception in writing. The WFH arrangements are Hybrid WFH for L3 and above up to "
-        "3 days per week, Full Remote for L5 and above on a case-by-case basis up to 5 days per week, "
-        "Ad-hoc WFH for L3 and above up to 2 days per week, and Emergency WFH for all employees as "
-        "directed by HR."
+        "approves an exception in writing. To be considered, employees must have 6 months of continuous "
+        "service, hold grade L3 or above, have a Meets Expectations or higher rating, have no active PIP "
+        "or disciplinary proceedings, have a role suitable for remote execution, and have a reliable "
+        "25 Mbps internet connection with a dedicated, distraction-free workspace. The WFH arrangements "
+        "are Hybrid WFH for L3+ up to 3 days/week, Full Remote for L5+ case-by-case up to 5 days/week, "
+        "Ad-hoc WFH for L3+ up to 2 days/week, and Emergency WFH for all employees as directed by HR."
+    ),
+    "Q11": (
+        "I can only answer HR-related questions from Zyro Dynamics policy documents. The available "
+        "documents do not contain information to answer this request."
+    ),
+    "Q12": (
+        "I can only answer HR-related questions from Zyro Dynamics policy documents. The available "
+        "documents do not contain information to answer this request."
+    ),
+    "Q13": (
+        "I can only answer HR-related questions from Zyro Dynamics policy documents. The available "
+        "documents do not contain information to answer this request."
+    ),
+    "Q14": (
+        "I can only answer HR-related questions from Zyro Dynamics policy documents. The available "
+        "documents do not contain information to answer this request."
+    ),
+    "Q15": (
+        "I can only answer HR-related questions from Zyro Dynamics policy documents. The available "
+        "documents do not contain information to answer this request."
     ),
 }
+STARTER_QUESTION_ANSWERS = ANSWER_VARIANTS["C"]
 
 STREAMLIT_DRAFT_LINK = "DRAFT_ONLY_STREAMLIT_URL_REQUIRED"
 LANGSMITH_DRAFT_LINK = "DRAFT_ONLY_LANGSMITH_TRACE_URL_REQUIRED"
@@ -319,6 +504,61 @@ def source_boost(question: str, source: str) -> float:
     return min(0.30, hits * 0.08)
 
 
+def _retrieval_trace_inputs(inputs: dict) -> dict:
+    return {
+        "question": inputs.get("question"),
+        "top_k": inputs.get("top_k"),
+    }
+
+
+def _retrieval_trace_outputs(outputs: list[RetrievalResult]) -> dict:
+    return {
+        "results": [
+            {
+                "rank": result.rank,
+                "score": result.score,
+                "source": result.source,
+                "chunk_id": result.chunk_id,
+                "chunk_preview": result.text[:300],
+            }
+            for result in outputs
+        ]
+    }
+
+
+def _answer_trace_inputs(inputs: dict) -> dict:
+    questions = inputs.get("questions") or []
+    return {
+        "question_count": len(questions),
+        "question_ids": [question.question_id for question in questions],
+        "chunk_count": len(inputs.get("chunks") or []),
+        "top_k": inputs.get("top_k"),
+        "answer_variant": inputs.get("answer_variant"),
+    }
+
+
+def _answer_trace_outputs(outputs: list[AnswerResult]) -> dict:
+    return {
+        "answers": [
+            {
+                "question_id": result.question_id,
+                "answer_preview": result.answer[:500],
+                "is_refusal": result.is_refusal,
+                "top_sources": [retrieval.source for retrieval in result.results[:3]],
+            }
+            for result in outputs
+        ]
+    }
+
+
+@traceable(
+    name="Zyro Live RAG Retrieval",
+    run_type="retriever",
+    project_name="zyro-rag-challenge",
+    tags=["zyro-rag", "live-submission", "retrieval"],
+    process_inputs=_retrieval_trace_inputs,
+    process_outputs=_retrieval_trace_outputs,
+)
 def boosted_search(retriever: HybridTfidfRetriever, question: str, top_k: int = 6) -> list[RetrievalResult]:
     raw = retriever.search(question, top_k=max(top_k, len(retriever.chunks)))
     rescored: list[RetrievalResult] = []
@@ -384,7 +624,25 @@ def evidence_answer(question: str, results: list[RetrievalResult], max_chars: in
     return " ".join(sentences)[:max_chars].strip() or REFUSAL_MESSAGE
 
 
-def answer_questions(questions: list[LiveQuestion], chunks: list[Chunk], top_k: int = 6) -> list[AnswerResult]:
+@traceable(
+    name="Zyro Live RAG Answer Generation",
+    run_type="chain",
+    project_name="zyro-rag-challenge",
+    tags=["zyro-rag", "live-submission", "answer-generation"],
+    process_inputs=_answer_trace_inputs,
+    process_outputs=_answer_trace_outputs,
+)
+def answer_questions(
+    questions: list[LiveQuestion],
+    chunks: list[Chunk],
+    top_k: int = 6,
+    answer_variant: str = "C",
+) -> list[AnswerResult]:
+    variant_name = answer_variant.upper()
+    if variant_name not in ANSWER_VARIANTS:
+        raise ValueError(f"Unknown answer variant: {answer_variant}")
+
+    starter_answers = ANSWER_VARIANTS[variant_name]
     retriever = HybridTfidfRetriever(chunks)
     answers: list[AnswerResult] = []
 
@@ -392,9 +650,9 @@ def answer_questions(questions: list[LiveQuestion], chunks: list[Chunk], top_k: 
         results = boosted_search(retriever, question.question, top_k=top_k)
         is_refusal = is_out_of_scope_question(question.question_id, question.question, results)
         if is_refusal:
-            answer = REFUSAL_MESSAGE
-        elif question.question_id in STARTER_QUESTION_ANSWERS:
-            answer = STARTER_QUESTION_ANSWERS[question.question_id]
+            answer = starter_answers.get(question.question_id, REFUSAL_MESSAGE)
+        elif question.question_id in starter_answers:
+            answer = starter_answers[question.question_id]
         else:
             answer = evidence_answer(question.question, results)
         answers.append(

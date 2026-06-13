@@ -6,6 +6,7 @@ datasets/
 kaggle.json
 __pycache__/
 .pytest_cache/
+.pytest_tmp/
 *.pyc
 *.zip
 .DS_Store
